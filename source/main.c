@@ -305,6 +305,70 @@ void unregister_outofregion() {
 	return;
 }
 
+void display_account_info() {
+	void* mem = linearAlloc(0x20000);
+	if (!mem) {
+		puts("Failed to allocate buffer");
+		return;
+	}
+
+	do {
+		NIM_AccountInformation* account_info = NULL;
+
+		Result res = _nimsInitConnect(mem, 0x20000, &account_info, 0x0004013000002C02LLU, 1234);
+		if (R_FAILED(res)) {
+			printf("Failed to connect: %08lx\n", res);
+			u32 supportcode;
+			Result res2 = _NIMS_GetSupportCode(&supportcode);
+			if (R_FAILED(res2))
+				printf("Failed to get support code: %08lx\n", res2);
+			else
+				printf("Support Code: %03lu-%04lu\n", supportcode / 10000u, supportcode % 10000u);
+			break;
+		}
+
+		print_account_info(account_info);
+
+		if (!account_info->Country) {
+			puts("Country null, stopping");
+			break;
+		}
+
+		IsoStr country;
+		country.str[0] = account_info->Country[0];
+		country.str[1] = account_info->Country[1];
+
+		u16 countrycode;
+		res = _CFGU_GetCountryCodeID(country.str16, &countrycode);
+		if (R_FAILED(res)) {
+			printf("Failed to convert country: %08lx\n", res);
+			break;
+		}
+
+		if (countrycode > sizeof(country_to_region_table) || country_to_region_table[countrycode] == -1) {
+			puts("Unknown region for country");
+			break;
+		}
+
+		u8 countryregion = country_to_region_table[countrycode];
+		u8 consoleregion = 0xFF;
+		res = _CFGU_SecureInfoGetRegion(&consoleregion);
+		if (R_FAILED(res)) {
+			printf("Failed to get console region: %08lx\n", res);
+			break;
+		}
+
+		if (consoleregion == countryregion) {
+			puts("Country matches the system region.");
+		}
+	} while(0);
+
+	linearFree(mem);
+
+	_nimsExit();
+	return;
+}
+
 int main(int argc, char **argv)
 {
 	_cfgInit();
@@ -327,8 +391,10 @@ int main(int argc, char **argv)
 
 	bool executed_run = false;
 
-	printf("Press the START button to exit.\n");
-	printf("Press the X button to fix and reboot.\n");
+	printf("Press the START to exit.\n");
+	printf("Press the B to display account info.\n");
+	printf("Press the X to fix and reboot.\n");
+
 	while (aptMainLoop())
 	{
 		gfxFlushBuffers();
@@ -340,6 +406,9 @@ int main(int argc, char **argv)
 		u32 kDown = hidKeysDown();
 		if (kDown & KEY_START && !executed_run)
 			break; // break in order to return to hbmenu
+
+		if (kDown & KEY_B && !executed_run)
+			display_account_info();
 
 		if (kDown & KEY_X && !executed_run) {
 			executed_run = true;
